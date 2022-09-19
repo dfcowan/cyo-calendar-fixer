@@ -51,8 +51,10 @@ def respond():
 
     rep = x.text
     rep = re.sub("St. Mark[^\)]*\)", "", rep)
-    rep = re.sub("Game:\d*: ", prefix + " ", rep)
-    rep = re.sub(" VS ", "", rep)
+    rep = re.sub("Game:\d*: ", "", rep)
+    rep = re.sub("SUMMARY: *VS", "SUMMARY: @", rep)
+    rep = re.sub("SUMMARY:", "SUMMARY: " + prefix, rep)
+    rep = re.sub("VS", "", rep)
 
     # print(rep)
 
