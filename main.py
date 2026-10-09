@@ -1,9 +1,26 @@
 import functions_framework
 import requests
 import re
+import ssl
 from collections import Counter
 from io import BytesIO, StringIO
 from flask import Flask, request, jsonify, send_file
+from requests.adapters import HTTPAdapter
+
+class LegacyCipherAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        # Create a custom SSL context
+        context = ssl.create_default_context()
+        
+        # Manually enable the specific legacy RSA ciphers the server needs
+        legacy_ciphers = (
+            'AES256-GCM-SHA384:AES128-GCM-SHA256:'
+            'AES256-SHA256:AES128-SHA256:AES256-SHA:AES128-SHA'
+        )
+        context.set_ciphers(legacy_ciphers)
+        
+        kwargs['ssl_context'] = context
+        return super(LegacyCipherAdapter, self).init_poolmanager(*args, **kwargs)
 
 @functions_framework.http
 def hello_http(request):
@@ -15,7 +32,7 @@ def hello_http(request):
        The response text, or any set of values that can be turned into a
        Response object using `make_response`
        <https://flask.palletsprojects.com/en/1.1.x/api/#flask.make_response>.
-
+   
    request_json = request.get_json(silent=True)
    request_args = request.args
 
@@ -44,7 +61,6 @@ def hello_http(request):
        response["ERROR"] = "contest must be numeric."
        error = True
 
-
    # Retrieve the team from url parameter
    team = request.args.get("team", None)
    # For debugging
@@ -65,20 +81,26 @@ def hello_http(request):
    # Check if user sent a prefix at all
    if not prefix:
        prefix = ""
-
    if error:
        return jsonify(response)
 
-   x = requests.get(f"https://archsacyo.sportspilot.com/Scheduler/public/synccalendar.aspx?contest={contest}&team={team}")
+   # Create a session and mount the adapter
+   session = requests.Session()
+   session.mount('https://', LegacyCipherAdapter())
+   
+   x = session.get(f"https://archsacyo.sportspilot.com/Scheduler/public/synccalendar.aspx?contest={contest}&team={team}")
 
    rep = x.text
 
    stmarkteams = re.findall("St. Mark[^\)]*\)", rep)
-   most_common = Counter(stmarkteams).most_common()[0][0]
-   most_common = most_common.replace("(", "\(")
-   most_common = most_common.replace(")", "\)")
+   if not stmarkteams:
+       stmarkteams = re.findall("ST MARK[^\)]*\)", rep)
+   if stmarkteams:
+       most_common = Counter(stmarkteams).most_common()[0][0]
+       most_common = most_common.replace("(", "\(")
+       most_common = most_common.replace(")", "\)")
+       rep = re.sub(most_common, "", rep)
 
-   rep = re.sub(most_common, "", rep)
    rep = re.sub("Game:\d*: ", "", rep)
    rep = re.sub("SUMMARY: *VS", "SUMMARY: @", rep)
    rep = re.sub("SUMMARY:", "SUMMARY: " + prefix, rep)
@@ -87,7 +109,7 @@ def hello_http(request):
 
    # Return the response in ics format
    return send_file(BytesIO(bytes(rep, 'utf8')), mimetype="text/calendar", as_attachment=True, download_name="cyo.ics")
-
+   
    # print(rep)
    # return rep
 
